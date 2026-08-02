@@ -8,7 +8,7 @@ from playwright.sync_api import sync_playwright
 app = Flask(__name__)
 
 # System Configurations & Webhook Location
-DISCORD_WEBHOOK_URL = "YOUR_DISCORD_WEBHOOK_URL_HERE"
+DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1533311689133523063/sFnRPV9wvEvbbnIyCUlUe4zCSrk5OhKKJjl0NzBvi-ke_2R5NdcYQUTyy2tmJbciePUn"
 NOTIFICATIONS_ENABLED = True
 
 # Global Application Filter Settings (Blank = Scan All)
@@ -138,7 +138,11 @@ HTML_DASHBOARD = """
         label { font-size: 13px; color: #94a3b8; font-weight: 600; text-transform: uppercase; }
         input { background-color: #0f172a; border: 1px solid #334155; padding: 10px; border-radius: 6px; color: white; font-size: 14px; }
         .btn { background-color: #38bdf8; color: #0f172a; font-weight: bold; border: none; padding: 12px; border-radius: 6px; cursor: pointer; text-align: center; text-decoration: none; }
-        .btn-toggle { background-color: #ef4444; color: white; }
+        
+        /* Dynamic Button Theme Colors */
+        .btn-toggle-on { background-color: #22c55e; color: white; padding: 12px 20px; border-radius: 6px; border: none; font-weight: bold; cursor: pointer; }
+        .btn-toggle-off { background-color: #ef4444; color: white; padding: 12px 20px; border-radius: 6px; border: none; font-weight: bold; cursor: pointer; }
+
         .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 20px; }
         .card { background-color: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 20px; position: relative; }
         .badge { position: absolute; top: 15px; right: 15px; background-color: #eab308; color: black; font-weight: bold; padding: 4px 8px; border-radius: 4px; font-size: 11px; }
@@ -157,7 +161,11 @@ HTML_DASHBOARD = """
                 <p style="color: #94a3b8; margin: 5px 0 0 0;">Configured with Customizable Live Filters</p>
             </div>
             <form action="/toggle-notifs" method="POST">
-                <button type="submit" class="btn btn-toggle">🔕 Toggle Discord Alerts</button>
+                {% if notifs %}
+                    <button type="submit" class="btn btn-toggle-on">🟢 Alerts: ON</button>
+                {% else %}
+                    <button type="submit" class="btn btn-toggle-off">🔴 Alerts: OFF</button>
+                {% ifendif %}
             </form>
         </header>
 
@@ -198,11 +206,13 @@ HTML_DASHBOARD = """
             </div>
             {% endfor %}
         </div>
+    </div>
+</body>
+</html>
 """
 
 @app.route('/')
 def dashboard():
-    check_card_deal("2024 Bowman Chrome Paul Skenes Rookie Autograph #BCP-1", 180.00, "midwest_slabs", "1m 45s")
     return render_template_string(HTML_DASHBOARD, deals=FOUND_DEALS, filters=APP_FILTERS, notifs=NOTIFICATIONS_ENABLED)
 
 @app.route('/set-filters', methods=['POST'])
