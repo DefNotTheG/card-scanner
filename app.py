@@ -198,6 +198,8 @@ HTML_DASHBOARD = """
             </div>
             {% endfor %}
         </div>
+"""
+
 @app.route('/')
 def dashboard():
     check_card_deal("2024 Bowman Chrome Paul Skenes Rookie Autograph #BCP-1", 180.00, "midwest_slabs", "1m 45s")
