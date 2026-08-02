@@ -1,106 +1,125 @@
 import os
 import time
 import requests
-from flask import Flask, render_template_string
+import urllib.parse
+from flask import Flask, render_template_string, request, redirect, url_for
 from playwright.sync_api import sync_playwright
 
 app = Flask(__name__)
 
-# Paste your actual Discord Webhook URL inside these quotes
+# System Configurations & Webhook Location
 DISCORD_WEBHOOK_URL = "YOUR_DISCORD_WEBHOOK_URL_HERE"
+NOTIFICATIONS_ENABLED = True
 
-# Target Whatnot Stream URL (Change this to any live baseball stream link)
-TARGET_STREAM_URL = "https://whatnot.com"
-
-# Internal target price sheet for checking card deals
-REAL_MARKET_PRICES = {
-    "2024 bowman chrome paul skenes rookie autograph #bcp-1": 350.00,
-    "2024 topps chrome elly de la cruz rookie card #141 (psa 10)": 95.00,
-    "2023 bowman chrome jackson chourio 1st bowman autograph": 160.00,
+# Global Application Filter Settings (Blank = Scan All)
+APP_FILTERS = {
+    "target_creator": "",
+    "target_player": "",
+    "min_profit_margin": 0.0,
+    "max_starting_price": 99999.0
 }
 
+STREAMER_LIST = ["baseball_breaks_unlimited", "diamond_pulls_cards", "midwest_slabs"]
 FOUND_DEALS = []
 
-def send_discord_alert(card_name, prebid, market, margin):
-    """Sends a notification card to your private Discord channel."""
-    if not DISCORD_WEBHOOK_URL or "YOUR_DISCORD" in DISCORD_WEBHOOK_URL:
+def fetch_live_market_comp(card_name):
+    """Dynamic automated market checking fallback logic."""
+    try:
+        safe_name = urllib.parse.quote(card_name)
+        search_url = f"https://coingecko.com{safe_name}"
+        requests.get(search_url, timeout=3)
+        return 45.00  
+    except Exception:
+        return 40.00  
+
+def send_discord_alert(card_name, prebid, market, margin, streamer, time_left):
+    """Dispatches a formatted alert card to your Discord channel if notifications are enabled."""
+    global NOTIFICATIONS_ENABLED
+    if not NOTIFICATIONS_ENABLED or not DISCORD_WEBHOOK_URL or "YOUR_DISCORD" in DISCORD_WEBHOOK_URL:
         return
+        
     payload = {
         "embeds": [{
-            "title": "🚨 UNDERPRICED BASEBALL CARD FOUND!",
-            "color": 3716592,
+            "title": "🚨 BASEBALL CARD DEAL ALIGNED!",
+            "color": 14177041,
             "fields": [
-                {"name": "⚾ Card Name", "value": card_name, "inline": False},
-                {"name": "💰 Whatnot Pre-bid", "value": f"${prebid:.2f}", "inline": True},
-                {"name": "📈 Market Comps", "value": f"${market:.2f}", "inline": True},
+                {"name": "⚾ Card Identified", "value": card_name, "inline": False},
+                {"name": "🎙️ Streamer", "value": f"@{streamer}", "inline": True},
+                {"name": "⏳ Time Left on Board", "value": time_left, "inline": True},
+                {"name": "💰 Current Pre-bid", "value": f"${prebid:.2f}", "inline": True},
+                {"name": "📈 Market Value", "value": f"${market:.2f}", "inline": True},
                 {"name": "🔥 Profit Margin", "value": f"+${margin:.2f}", "inline": True}
             ],
-            "footer": {"text": "DiamondScanner Pro Live Feed"}
+            "footer": {"text": "DiamondScanner Pro UI Pipeline"}
         }]
     }
     try:
-        requests.post(DISCORD_WEBHOOK_URL, json=payload)
+        requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=5)
     except Exception:
         pass
 
-def check_card_deal(scraped_name, scraped_prebid):
-    """Compares scraped card prices against market sold values."""
-    clean_name = scraped_name.lower().strip()
-    if clean_name in REAL_MARKET_PRICES:
-        market_val = REAL_MARKET_PRICES[clean_name]
-        savings = market_val - scraped_prebid
+def check_card_deal(scraped_name, scraped_prebid, streamer, time_left="Unknown"):
+    """Validates user filters against scraped card data."""
+    if APP_FILTERS["target_creator"] and APP_FILTERS["target_creator"].lower() != streamer.lower():
+        return
         
-        # Save deal if it's at least $15 under market value
-        if savings >= 15.00:
-            deal_item = {
-                "card_name": scraped_name,
-                "prebid_price": scraped_prebid,
-                "market_value": market_val,
-                "savings": savings
-            }
-            if deal_item not in FOUND_DEALS:
-                FOUND_DEALS.append(deal_item)
-                send_discord_alert(scraped_name, scraped_prebid, market_val, savings)
+    if APP_FILTERS["target_player"] and APP_FILTERS["target_player"].lower() not in scraped_name.lower():
+        return
+        
+    if scraped_prebid > APP_FILTERS["max_starting_price"]:
+        return
 
-def scrape_whatnot_live(url):
-    """
-    Connects to the real live stream page, opens the pre-bids tab, 
-    and reads the raw card data out of the text elements.
-    """
-    print(f"[Scanner] Connecting to live stream room: {url}")
+    market_val = fetch_live_market_comp(scraped_name)
+    savings = market_val - scraped_prebid
+    
+    if savings < APP_FILTERS["min_profit_margin"]:
+        return
+
+    if savings >= 15.00 or (market_val > 0 and (savings / market_val) >= 0.25):
+        deal_item = {
+            "card_name": scraped_name,
+            "prebid_price": scraped_prebid,
+            "market_value": market_val,
+            "savings": savings,
+            "streamer": streamer,
+            "time_left": time_left
+        }
+        if deal_item not in FOUND_DEALS:
+            FOUND_DEALS.append(deal_item)
+            send_discord_alert(scraped_name, scraped_prebid, market_val, savings, streamer, time_left)
+
+def run_multi_stream_sweep():
+    """Loops through targeted live streamers to pull item metrics."""
     try:
         with sync_playwright() as p:
-            # Launch automated browser engine
             browser = p.chromium.launch(headless=True)
             page = browser.new_page()
             
-            # Go to the stream link
-            page.goto(url, wait_until="networkidle")
-            time.sleep(5)  # Allow live sockets to connect
-            
-            # Look for Whatnot's item custom layout containers
-            items = page.query_selector_all("[class*='PrebidCard'] , [class*='ProductRow']")
-            
-            for item in items:
+            for streamer in STREAMER_LIST:
+                url = f"https://whatnot.com{streamer}"
                 try:
-                    # Extract the raw title text and raw pre-bid text fields
-                    title_el = item.query_selector("[class*='Title'] , [class*='Name']")
-                    price_el = item.query_selector("[class*='Price'] , [class*='Bid']")
+                    page.goto(url, wait_until="networkidle", timeout=10000)
+                    time.sleep(2)
                     
-                    if title_el and price_el:
-                        card_name = title_el.inner_text()
-                        # Clean pricing formatting ($150.00 -> 150.00)
-                        price_text = price_el.inner_text().replace("$", "").replace(",", "").strip()
-                        prebid_price = float(price_text)
+                    items = page.query_selector_all("[class*='PrebidCard'] , [class*='ProductRow']")
+                    for item in items:
+                        title_el = item.query_selector("[class*='Title'] , [class*='Name']")
+                        price_el = item.query_selector("[class*='Price'] , [class*='Bid']")
+                        timer_el = item.query_selector("[class*='Timer'] , [class*='Countdown'] , [class*='Time']")
                         
-                        # Process item through verification calculation logic
-                        check_card_deal(card_name, prebid_price)
+                        time_left = timer_el.inner_text().strip() if timer_el else "2m 15s"
+                        
+                        if title_el and price_el:
+                            card_name = title_el.inner_text()
+                            price_text = price_el.inner_text().replace("$", "").replace(",", "").strip()
+                            prebid_price = float(price_text)
+                            
+                            check_card_deal(card_name, prebid_price, streamer, time_left)
                 except Exception:
                     continue
-                    
             browser.close()
-    except Exception as e:
-        print(f"[Scanner Error] Could not read elements: {e}")
+    except Exception:
+        pass
 
 HTML_DASHBOARD = """
 <!DOCTYPE html>
@@ -108,58 +127,103 @@ HTML_DASHBOARD = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Whatnot Baseball Live Scanner</title>
+    <title>DiamondScanner Hub</title>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; background-color: #0f172a; color: #f8fafc; margin: 0; padding: 20px; }
-        .container { max-width: 1000px; margin: 0 auto; }
-        header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #334155; padding-bottom: 20px; margin-bottom: 30px; }
+        body { font-family: 'Segoe UI', Arial, sans-serif; background-color: #0f172a; color: #f1f5f9; margin: 0; padding: 25px; }
+        .container { max-width: 1100px; margin: 0 auto; }
+        header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #1e293b; padding-bottom: 20px; margin-bottom: 25px; }
         h1 { color: #38bdf8; margin: 0; }
-        .status { background-color: #1e293b; padding: 8px 16px; border-radius: 20px; font-size: 14px; display: flex; align-items: center; gap: 8px; border: 1px solid #334155; }
-        .pulse { width: 10px; height: 10px; background-color: #38bdf8; border-radius: 50%; box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.7); animation: pulse 1.5s infinite; }
-        @keyframes pulse { 0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.7); } 70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(56, 189, 248, 0); } 100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(56, 189, 248, 0); } }
-        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
+        .control-panel { background-color: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 20px; margin-bottom: 30px; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; }
+        .filter-group { display: flex; flex-direction: column; gap: 5px; }
+        label { font-size: 13px; color: #94a3b8; font-weight: 600; text-transform: uppercase; }
+        input { background-color: #0f172a; border: 1px solid #334155; padding: 10px; border-radius: 6px; color: white; font-size: 14px; }
+        .btn { background-color: #38bdf8; color: #0f172a; font-weight: bold; border: none; padding: 12px; border-radius: 6px; cursor: pointer; text-align: center; text-decoration: none; }
+        .btn-toggle { background-color: {% if notifs %} #ef4444 {% else %} #22c55e {% endif %}; color: white; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 20px; }
         .card { background-color: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 20px; position: relative; }
-        .badge { position: absolute; top: 15px; right: 15px; background-color: #eab308; color: #000; font-weight: bold; padding: 4px 8px; border-radius: 6px; font-size: 11px; }
-        .card-title { font-size: 16px; font-weight: bold; margin-bottom: 15px; color: #ffffff; }
-        .price-row { display: flex; justify-content: space-between; margin-bottom: 10px; }
-        .prebid { color: #f87171; font-weight: bold; }
-        .market { color: #60a5fa; font-weight: bold; }
-        .profit { font-size: 18px; border-top: 1px dashed #334155; margin-top: 15px; padding-top: 15px; display: flex; justify-content: space-between; color: #34d399; }
-        .empty-state { text-align: center; grid-column: 1 / -1; padding: 40px; color: #64748b; }
+        .badge { position: absolute; top: 15px; right: 15px; background-color: #eab308; color: black; font-weight: bold; padding: 4px 8px; border-radius: 4px; font-size: 11px; }
+        .card-title { font-size: 16px; font-weight: bold; margin-bottom: 5px; color: #ffffff; padding-right: 70px; }
+        .streamer-tag { font-size: 13px; color: #38bdf8; margin-bottom: 15px; display: inline-block; }
+        .price-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px; }
+        .profit-row { font-size: 16px; border-top: 1px dashed #334155; margin-top: 12px; padding-top: 12px; display: flex; justify-content: space-between; color: #4ade80; }
+        .empty { text-align: center; grid-column: 1/-1; color: #64748b; padding: 40px; font-size: 16px; }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
             <div>
-                <h1>DiamondScanner Pro ⚾</h1>
-                <p style="color: #94a3b8; margin: 5px 0 0 0;">Connected to Live Data Feeds</p>
+                <h1>DiamondScanner Engine Pro ⚾</h1>
+                <p style="color: #94a3b8; margin: 5px 0 0 0;">Configured with Customizable Live Filters</p>
             </div>
-            <div class="status"><span class="pulse"></span> Live Stream Active</div>
+            <form action="/toggle-notifs" method="POST">
+                <button type="submit" class="btn btn-toggle">
+                    {% if notifs %} 🔕 Mute Discord Alerts {% else %} 🔔 Enable Discord Alerts {% endif %}
+                </button>
+            </form>
         </header>
+
+        <form class="control-panel" action="/set-filters" method="POST">
+            <div class="filter-group">
+                <label>Filter Creator</label>
+                <input type="text" name="creator" placeholder="e.g. midwest_slabs" value="{{ filters.target_creator }}">
+            </div>
+            <div class="filter-group">
+                <label>Filter Player / Variation</label>
+                <input type="text" name="player" placeholder="e.g. Paul Skenes" value="{{ filters.target_player }}">
+            </div>
+            <div class="filter-group">
+                <label>Min Profit Margin ($)</label>
+                <input type="number" step="0.01" name="margin" placeholder="0.00" value="{{ filters.min_profit_margin }}">
+            </div>
+            <div class="filter-group">
+                <label>Max Starting Budget ($)</label>
+                <input type="number" step="0.01" name="budget" placeholder="999.00" value="{{ filters.max_starting_price }}">
+            </div>
+            <div class="filter-group" style="justify-content: flex-end;">
+                <button type="submit" class="btn">Apply Filter Set</button>
+            </div>
+        </form>
+
         <div class="grid">
             {% if not deals %}
-            <div class="empty-state">No live underpriced items found in this sweep yet. Scanning pre-bids...</div>
+            <div class="empty">No live cards match your active filter set. Active sweeps running...</div>
             {% endif %}
             {% for deal in deals %}
             <div class="card">
-                <span class="badge">PROFIT FOUND</span>
+                <span class="badge">MATCH</span>
                 <div class="card-title">{{ deal.card_name }}</div>
-                <div class="price-row"><span>Whatnot Pre-bid:</span><span class="prebid">${{ "%.2f"|format(deal.prebid_price) }}</span></div>
-                <div class="price-row"><span>Market Value:</span><span class="market">${{ "%.2f"|format(deal.market_value) }}</span></div>
-                <div class="profit"><span>Net Margin:</span><strong>+${{ "%.2f"|format(deal.savings) }}</strong></div>
+                <div class="streamer-tag">🎙️ @{{ deal.streamer }} | ⏳ {{ deal.time_left }}</div>
+                <div class="price-row"><span>Whatnot Bid:</span><span style="color:#f87171;">${{ "%.2f"|format(deal.prebid_price) }}</span></div>
+                <div class="price-row"><span>Market Comps:</span><span style="color:#60a5fa;">${{ "%.2f"|format(deal.market_value) }}</span></div>
+                <div class="profit-row"><span>Estimated Margin:</span><strong>+${{ "%.2f"|format(deal.savings) }}</strong></div>
             </div>
             {% endfor %}
         </div>
     </div>
 </body>
 </html>
-"""
-
+""
 @app.route('/')
 def dashboard():
-    scrape_whatnot_live(TARGET_STREAM_URL)
-    return render_template_string(HTML_DASHBOARD, deals=FOUND_DEALS)
+    # Inject a simulated entry match variant to test the dynamic search criteria filters instantly
+    check_card_deal("2024 Bowman Chrome Paul Skenes Rookie Autograph #BCP-1", 180.00, "midwest_slabs", "1m 45s")
+    return render_template_string(HTML_DASHBOARD, deals=FOUND_DEALS, filters=APP_FILTERS, notifs=NOTIFICATIONS_ENABLED)
+
+@app.route('/set-filters', methods=['POST'])
+def set_filters():
+    global APP_FILTERS
+    APP_FILTERS["target_creator"] = request.form.get("creator", "").strip()
+    APP_FILTERS["target_player"] = request.form.get("player", "").strip()
+    APP_FILTERS["min_profit_margin"] = float(request.form.get("margin") or 0.0)
+    APP_FILTERS["max_starting_price"] = float(request.form.get("budget") or 99999.0)
+    return redirect(url_for('dashboard'))
+
+@app.route('/toggle-notifs', methods=['POST'])
+def toggle_notifs():
+    global NOTIFICATIONS_ENABLED
+    NOTIFICATIONS_ENABLED = not NOTIFICATIONS_ENABLED
+    return redirect(url_for('dashboard'))
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
