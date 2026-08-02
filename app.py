@@ -138,7 +138,7 @@ HTML_DASHBOARD = """
         label { font-size: 13px; color: #94a3b8; font-weight: 600; text-transform: uppercase; }
         input { background-color: #0f172a; border: 1px solid #334155; padding: 10px; border-radius: 6px; color: white; font-size: 14px; }
         .btn { background-color: #38bdf8; color: #0f172a; font-weight: bold; border: none; padding: 12px; border-radius: 6px; cursor: pointer; text-align: center; text-decoration: none; }
-        .btn-toggle { background-color: {% if notifs %} #ef4444 {% else %} #22c55e {% endif %}; color: white; }
+        .btn-toggle { background-color: #ef4444; color: white; }
         .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 20px; }
         .card { background-color: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 20px; position: relative; }
         .badge { position: absolute; top: 15px; right: 15px; background-color: #eab308; color: black; font-weight: bold; padding: 4px 8px; border-radius: 4px; font-size: 11px; }
@@ -157,9 +157,7 @@ HTML_DASHBOARD = """
                 <p style="color: #94a3b8; margin: 5px 0 0 0;">Configured with Customizable Live Filters</p>
             </div>
             <form action="/toggle-notifs" method="POST">
-                <button type="submit" class="btn btn-toggle">
-                    {% if notifs %} 🔕 Mute Discord Alerts {% else %} 🔔 Enable Discord Alerts {% endif %}
-                </button>
+                <button type="submit" class="btn btn-toggle">🔕 Toggle Discord Alerts</button>
             </form>
         </header>
 
@@ -200,13 +198,8 @@ HTML_DASHBOARD = """
             </div>
             {% endfor %}
         </div>
-    </div>
-</body>
-</html>
-""
 @app.route('/')
 def dashboard():
-    # Inject a simulated entry match variant to test the dynamic search criteria filters instantly
     check_card_deal("2024 Bowman Chrome Paul Skenes Rookie Autograph #BCP-1", 180.00, "midwest_slabs", "1m 45s")
     return render_template_string(HTML_DASHBOARD, deals=FOUND_DEALS, filters=APP_FILTERS, notifs=NOTIFICATIONS_ENABLED)
 
