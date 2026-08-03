@@ -9,7 +9,7 @@ from flask import Flask, render_template_string, request, redirect, url_for
 app = Flask(__name__)
 
 # System Configurations
-DISCORD_WEBHOOK_URL = "https://discord.com"
+DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1533311689133523063/sFnRPV9wvEvbbnIyCUlUe4zCSrk5OhKKJjl0NzBvi-ke_2R5NdcYQUTyy2tmJbciePUn"
 NOTIFICATIONS_ENABLED = True
 
 # Global Application Filter Settings (Blank = Scan All)
