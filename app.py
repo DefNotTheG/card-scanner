@@ -7,8 +7,8 @@ from playwright.sync_api import sync_playwright
 
 app = Flask(__name__)
 
-# System Configurations & Webhook Location
-DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1533311689133523063/sFnRPV9wvEvbbnIyCUlUe4zCSrk5OhKKJjl0NzBvi-ke_2R5NdcYQUTyy2tmJbciePUn"
+# Locked Webhook URL for all deployments
+DISCORD_WEBHOOK_URL = "https://discord.com"
 NOTIFICATIONS_ENABLED = True
 
 # Global Application Filter Settings (Blank = Scan All)
@@ -35,7 +35,7 @@ def fetch_live_market_comp(card_name):
 def send_discord_alert(card_name, prebid, market, margin, streamer, time_left):
     """Dispatches a formatted alert card to your Discord channel if notifications are enabled."""
     global NOTIFICATIONS_ENABLED
-    if not NOTIFICATIONS_ENABLED or not DISCORD_WEBHOOK_URL or "YOUR_DISCORD" in DISCORD_WEBHOOK_URL:
+    if not NOTIFICATIONS_ENABLED:
         return
         
     payload = {
@@ -139,7 +139,6 @@ HTML_DASHBOARD = """
         input { background-color: #0f172a; border: 1px solid #334155; padding: 10px; border-radius: 6px; color: white; font-size: 14px; }
         .btn { background-color: #38bdf8; color: #0f172a; font-weight: bold; border: none; padding: 12px; border-radius: 6px; cursor: pointer; text-align: center; text-decoration: none; }
         
-        /* Dynamic Button Theme Colors */
         .btn-toggle-on { background-color: #22c55e; color: white; padding: 12px 20px; border-radius: 6px; border: none; font-weight: bold; cursor: pointer; }
         .btn-toggle-off { background-color: #ef4444; color: white; padding: 12px 20px; border-radius: 6px; border: none; font-weight: bold; cursor: pointer; }
 
@@ -165,18 +164,18 @@ HTML_DASHBOARD = """
                     <button type="submit" class="btn btn-toggle-on">🟢 Alerts: ON</button>
                 {% else %}
                     <button type="submit" class="btn btn-toggle-off">🔴 Alerts: OFF</button>
-                {% ifendif %}
+                {% endif %}
             </form>
         </header>
 
         <form class="control-panel" action="/set-filters" method="POST">
             <div class="filter-group">
                 <label>Filter Creator</label>
-                <input type="text" name="creator" placeholder="e.g. midwest_slabs" value="{{ filters.target_creator }}">
+                <input type="text" name="creator" placeholder="all creators" value="{{ filters.target_creator }}">
             </div>
             <div class="filter-group">
                 <label>Filter Player / Variation</label>
-                <input type="text" name="player" placeholder="e.g. Paul Skenes" value="{{ filters.target_player }}">
+                <input type="text" name="player" placeholder="all cards" value="{{ filters.target_player }}">
             </div>
             <div class="filter-group">
                 <label>Min Profit Margin ($)</label>
@@ -184,7 +183,7 @@ HTML_DASHBOARD = """
             </div>
             <div class="filter-group">
                 <label>Max Starting Budget ($)</label>
-                <input type="number" step="0.01" name="budget" placeholder="999.00" value="{{ filters.max_starting_price }}">
+                <input type="number" step="0.01" name="budget" placeholder="99999.00" value="{{ filters.max_starting_price }}">
             </div>
             <div class="filter-group" style="justify-content: flex-end;">
                 <button type="submit" class="btn">Apply Filter Set</button>
