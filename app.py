@@ -2,13 +2,14 @@ import os
 import time
 import requests
 import urllib.parse
+import threading
 from flask import Flask, render_template_string, request, redirect, url_for
 from playwright.sync_api import sync_playwright
 
 app = Flask(__name__)
 
 # Locked Webhook URL for all deployments
-DISCORD_WEBHOOK_URL = "https://discord.com"
+DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1533311689133523063/sFnRPV9wvEvbbnIyCUlUe4zCSrk5OhKKJjl0NzBvi-ke_2R5NdcYQUTyy2tmJbciePUn"
 NOTIFICATIONS_ENABLED = True
 
 # Global Application Filter Settings (Blank = Scan All)
@@ -121,6 +122,16 @@ def run_multi_stream_sweep():
     except Exception:
         pass
 
+def background_loop_scheduler():
+    """Hidden background thread that runs the sweep loop every 5 minutes (300s) completely for free."""
+    print("[Automation Thread] 5-Minute Free Background Engine Started Active!")
+    while True:
+        try:
+            run_multi_stream_sweep()
+        except Exception as e:
+            print(f"[Automation Error] Background thread sweep issue: {e}")
+        time.sleep(300)
+
 HTML_DASHBOARD = """
 <!DOCTYPE html>
 <html lang="en">
@@ -228,6 +239,9 @@ def toggle_notifs():
     global NOTIFICATIONS_ENABLED
     NOTIFICATIONS_ENABLED = not NOTIFICATIONS_ENABLED
     return redirect(url_for('dashboard'))
+
+# Automatically runs the internal 5-minute automated thread when the web service starts up
+threading.Thread(target=background_loop_scheduler, daemon=True).start()
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
