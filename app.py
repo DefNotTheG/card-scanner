@@ -9,30 +9,27 @@ from flask import Flask, render_template_string, request, redirect, url_for
 app = Flask(__name__)
 
 # System Configurations
-DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1533311689133523063/sFnRPV9wvEvbbnIyCUlUe4zCSrk5OhKKJjl0NzBvi-ke_2R5NdcYQUTyy2tmJbciePUn"
+DISCORD_WEBHOOK_URL = "https://discord.com"
 NOTIFICATIONS_ENABLED = True
 
 # Global Application Filter Settings (Blank = Scan All)
 APP_FILTERS = {
     "target_keyword": "",
-    "min_profit_margin": 15.00,  # Minimum net profit dollar threshold
+    "min_profit_margin": 15.00,
     "max_starting_price": 500.00
 }
 
 FOUND_DEALS = []
 
 def calculate_ebay_arbitrage(listed_price):
-    """
-    Financial Stack Math Matrix: Estimates market value comps baseline 
-    and handles custom eBay fee deductions (13.25% final value fee + $0.30 fixed).
-    """
-    estimated_market_value = listed_price * 1.50 # Assuming item value baseline multiplier
+    """Calculates custom eBay fee deductions and sets profit margins."""
+    estimated_market_value = listed_price * 1.50
     ebay_fees = (estimated_market_value * 0.1325) + 0.30
     net_profit = estimated_market_value - listed_price - ebay_fees
     return estimated_market_value, net_profit
 
-def send_discord_deal_alert(title, price, market, profit, link):
-    """Dispatches a structured flip alert ticket directly to your Discord server."""
+def send_discord_deal_alert(title, price, market, profit, link, image_url=None):
+    """Dispatches a formatted arbitrage ticket with an image attachment to Discord."""
     global NOTIFICATIONS_ENABLED
     if not NOTIFICATIONS_ENABLED:
         return
@@ -41,35 +38,49 @@ def send_discord_deal_alert(title, price, market, profit, link):
         "embeds": [{
             "title": "🔥 EBAY UNDERPRICED FLIP ALIGNED!",
             "url": link,
-            "color": 16738048, # Vibrant eBay Orange
+            "color": 16738048, # eBay Orange
             "fields": [
                 {"name": "📦 Item Description", "value": title, "inline": False},
                 {"name": "💰 Listed Buy It Now Price", "value": f"${price:.2f}", "inline": True},
                 {"name": "📈 Estimated Market Value", "value": f"${market:.2f}", "inline": True},
                 {"name": "💵 Projected Net Profit", "value": f"+${profit:.2f}", "inline": True}
             ],
-            "footer": {"text": "DiamondScanner Pro | eBay Arbitrage Network Pipeline"}
+            "footer": {"text": "DiamondScanner Pro | eBay Arbitrage pipeline"}
         }]
     }
+    
+    # If eBay provides a thumbnail image, inject it directly into the Discord preview panel
+    if image_url:
+        payload["embeds"][0]["image"] = {"url": image_url}
+        
     try:
         requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=5)
     except Exception:
         pass
 
+def send_system_startup_ping():
+    """Fires a verification alert immediately on launch so you know your webhook is active."""
+    payload = {
+        "embeds": [{
+            "title": "🔌 SCANNER CONNECTION LIVE",
+            "description": "Your eBay Arbitrage Cloud Scanner is online and monitoring newly listed feeds 24/7.",
+            "color": 2263842
+        }]
+    }
+    try:
+        requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=5)
+        print("[System] Verification launch ping dispatched successfully.")
+    except Exception:
+        pass
+
 def run_ebay_feed_sweep():
-    """
-    Advanced Web Parser Pipeline: Leverages secure RSS endpoints 
-    to fetch and calculate newly listed matching deals cleanly.
-    """
+    """Parses eBay RSS text nodes for prices and listing thumbnail locations."""
     global FOUND_DEALS
     print("[eBay Engine] Scanning global live listings feed indices...")
     
-    # Defaults to general high-value tracking keyword if form box is blank
     search_term = APP_FILTERS["target_keyword"] if APP_FILTERS["target_keyword"] else "baseball cards lot"
     safe_keyword = urllib.parse.quote(search_term)
-    
-    # Constructing a targeted live eBay scraper endpoint query using advanced RSS flags
-    feed_url = f"https://www.ebay.com/dsc/i.html?_nkw={safe_keyword}&_rss=1&rt=nc&LH_BIN=1"
+    feed_url = f"https://ebay.com{safe_keyword}&_rss=1&rt=nc&LH_BIN=1"
     
     try:
         response = requests.get(feed_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
@@ -77,13 +88,20 @@ def run_ebay_feed_sweep():
             return
             
         root = ET.fromstring(response.content)
+        
+        # Define XML namespaces that eBay uses to hide listing images
+        namespaces = {'media': 'http://yahoo.com'}
+        
         for item in root.findall(".//item"):
             title = item.find("title").text if item.find("title") is not None else "Unknown Item"
-            link = item.find("link").text if item.find("link") is not None else "https://www.ebay.com"
+            link = item.find("link").text if item.find("link") is not None else "https://ebay.com"
             description = item.find("description").text if item.find("description") is not None else ""
             
-            # Clean and parse text pricing fields out of raw XML feed parameters
-            price = 25.00 # Base search layout fallback extraction parameter anchor
+            # Scrape out eBay's media content asset url to pull listing pictures
+            media_content = item.find("media:content", namespaces)
+            image_url = media_content.get("url") if media_content is not None else None
+            
+            price = 25.00
             if "Price:" in description:
                 try:
                     price_str = description.split("Price:")[1].split()[0].replace("$", "").replace(",", "").strip()
@@ -91,7 +109,6 @@ def run_ebay_feed_sweep():
                 except Exception:
                     continue
             
-            # Run custom filter restriction guard gates
             if price > APP_FILTERS["max_starting_price"]:
                 continue
                 
@@ -100,24 +117,27 @@ def run_ebay_feed_sweep():
             if net_profit < APP_FILTERS["min_profit_margin"]:
                 continue
                 
-            # Filter unique values to prevent dashboard stacking duplication issues
             deal_entry = {
                 "title": title,
                 "price": price,
                 "market": market_val,
                 "profit": net_profit,
-                "link": link
+                "link": link,
+                "image": image_url
             }
             if not any(d['title'] == title for d in FOUND_DEALS):
                 FOUND_DEALS.append(deal_entry)
-                send_discord_deal_alert(title, price, market_val, net_profit, link)
+                send_discord_deal_alert(title, price, market_val, net_profit, link, image_url)
                 
     except Exception as e:
         print(f"[eBay Error] Sweep sequence trace halt: {e}")
 
 def continuous_automation_scheduler():
-    """Hidden background processor that loops sweeps every 5 minutes forever for free."""
+    """Loops background checks every 5 minutes."""
     print("[Automation Thread] eBay 5-Minute Arbitrage Runner Engaged!")
+    # Run a test verification ping instantly on server launch
+    send_system_startup_ping()
+    
     while True:
         try:
             run_ebay_feed_sweep()
@@ -142,8 +162,10 @@ HTML_DASHBOARD = """
         label { font-size: 13px; color: #64748b; font-weight: 600; text-transform: uppercase; }
         input { background-color: #0b0f19; border: 1px solid #1e293b; padding: 10px; border-radius: 6px; color: white; font-size: 14px; }
         .btn { background-color: #f59e0b; color: black; font-weight: bold; border: none; padding: 12px; border-radius: 6px; cursor: pointer; text-align: center; text-decoration: none; }
+        
         .btn-toggle-on { background-color: #10b981; color: white; padding: 12px 20px; border-radius: 6px; border: none; font-weight: bold; cursor: pointer; }
         .btn-toggle-off { background-color: #ef4444; color: white; padding: 12px 20px; border-radius: 6px; border: none; font-weight: bold; cursor: pointer; }
+
         .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 20px; }
         .card { background-color: #111827; border: 1px solid #1e293b; border-radius: 12px; padding: 20px; position: relative; display: flex; flex-direction: column; justify-content: space-between; }
         .badge { position: absolute; top: 15px; right: 15px; background-color: #ef4444; color: white; font-weight: bold; padding: 4px 8px; border-radius: 4px; font-size: 11px; }
@@ -151,6 +173,7 @@ HTML_DASHBOARD = """
         .price-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px; }
         .profit-row { font-size: 16px; border-top: 1px dashed #1e293b; margin-top: 12px; padding-top: 12px; display: flex; justify-content: space-between; color: #10b981; }
         .empty { text-align: center; grid-column: 1/-1; color: #4b5563; padding: 40px; font-size: 16px; }
+        .card-img { width: 100%; height: 160px; object-fit: cover; border-radius: 6px; margin-bottom: 15px; background-color: #0b0f19; }
     </style>
 </head>
 <body>
@@ -180,8 +203,6 @@ HTML_DASHBOARD = """
             </div>
             <div class="filter-group">
                 <label>Max Buy It Now Price Budget ($)</label>
-                <input type="number" step="0.01" name="budget" placeholder="500.00" value="{{ filters.max_starting_price }}">
-            </div>
             <div class="filter-group" style="justify-content: flex-end;">
                 <button type="submit" class="btn">Lock Search Filters</button>
             </div>
@@ -194,6 +215,9 @@ HTML_DASHBOARD = """
             {% for deal in deals %}
             <div class="card">
                 <div>
+                    {% if deal.image %}
+                        <img src="{{ deal.image }}" class="card-img" alt="Product Image">
+                    {% endif %}
                     <span class="badge">EBAY BIN</span>
                     <div class="card-title">{{ deal.title }}</div>
                     <div class="price-row"><span>Listed Price:</span><span style="color:#f87171; font-weight:bold;">${{ "%.2f"|format(deal.price) }}</span></div>
@@ -221,7 +245,7 @@ def set_filters():
     APP_FILTERS["target_keyword"] = request.form.get("keyword", "").strip()
     APP_FILTERS["min_profit_margin"] = float(request.form.get("margin") or 0.0)
     APP_FILTERS["max_starting_price"] = float(request.form.get("budget") or 99999.0)
-    FOUND_DEALS = [] # Wipe memory for clean fresh filter parameters search items sweep
+    FOUND_DEALS = []
     return redirect(url_for('dashboard'))
 
 @app.route('/toggle-notifs', methods=['POST'])
@@ -230,7 +254,6 @@ def toggle_notifs():
     NOTIFICATIONS_ENABLED = not NOTIFICATIONS_ENABLED
     return redirect(url_for('dashboard'))
 
-# Automatically runs the internal 5-minute automated thread when the web service starts up
 threading.Thread(target=continuous_automation_scheduler, daemon=True).start()
 
 if __name__ == '__main__':
