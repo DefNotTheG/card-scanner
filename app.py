@@ -20,7 +20,7 @@ APP_FILTERS = {
     "max_starting_price": 99999.0
 }
 
-STREAMER_LIST = ["baseball_breaks_unlimited", "diamond_pulls_cards", "midwest_slabs"]
+STREAMER_LIST = ["cardcollector2", "backyardbaseball", "wethehobby", "northof7", "blezsportscards", "swishbreaks", "cardshqbreaks"]
 FOUND_DEALS = []
 
 def fetch_live_market_comp(card_name):
